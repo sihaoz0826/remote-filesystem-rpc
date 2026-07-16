@@ -4,6 +4,11 @@ A transparent remote file-access system in **C**: unmodified programs can read a
 actually live on a remote server, with no changes to their source. Achieved by **interposing** on the
 C library's file calls and forwarding them over a custom RPC protocol.
 
+> **Deep-dive highlight —** the **custom binary RPC protocol** and the `send_all`/`recv_all`
+> streaming loop: requests are length-prefixed and opcode-tagged in network byte order, and every
+> socket read/write loops until the full message is transferred to survive partial TCP reads/writes.
+> This is the low-level networking + Linux systems core worth walking through line by line.
+
 ## How it works
 
 Using `LD_PRELOAD`, a client-side library **intercepts** libc file operations (`open`, `read`,
@@ -51,6 +56,19 @@ SERVER_PORT=9090 ./server
 # Client (any program):
 SERVER_HOST=127.0.0.1 SERVER_PORT=9090 LD_PRELOAD=./mylib.so <your-program>
 ```
+
+## Key code to look at
+
+The networking + protocol core lives in `client.c`:
+
+| Lines | What it is |
+|---|---|
+| `119-134` | `send_all()` — loops until every byte is sent (handles short writes) |
+| `137-150` | `recv_all()` — loops until the full message arrives (handles short reads / closed conn) |
+| `152-175` | `send_rpc_request()` — the framing: 4-byte length prefix + 1-byte opcode + payload |
+| `181-219` | `recv_rpc_response()` — parses the frame back, validates length, converts byte order |
+| `46-116` | `connect_to_server()` — TCP setup incl. `TCP_NODELAY` and larger socket buffers |
+| `1113-1206` | `deserialize_dirtree()` — recursive deserialization of a directory tree over the wire |
 
 ## Tech Stack
 
